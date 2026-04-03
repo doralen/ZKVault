@@ -1,41 +1,120 @@
 # ZKVault
 
-ZKVault 是一个基于 C++ 和 OpenSSL 的单用户密码保险箱 CLI 原型。
+ZKVault 是一套面向本地终端环境的安全保险库平台，定位于 TUI（Text User Interface）场景下的敏感数据管理与受控交互。
 
-当前版本聚焦最小可运行闭环：
-- 初始化保险库
-- 使用主密码通过 `scrypt` 派生 KEK
-- 使用 KEK 包裹 DEK
-- 使用 DEK 通过 `AES-256-GCM` 加密密码条目
-- 通过 CLI 完成增删查改和列表查看
+当前仓库提供的 `zkvault` 可执行程序承担终端接入层职责，用于组织用户交互、调用保险库核心能力并验证前端集成边界。项目后续演进方向为完整的 TUI 应用，而非服务端系统或网络 API 产品。
 
-## 技术概览
+## 产品定位
 
-- 运行环境：Linux
-- 构建工具：CMake
+- 产品名称：`ZKVault`
+- 目标形态：本地终端安全保险库平台
+- 主要界面：TUI
+- 部署方式：单机本地运行
+- 对外边界：前端集成接口
+- 非目标范围：HTTP API、守护进程、多租户服务端架构
+
+项目关注以下能力域：
+
+- 主密码管理与密钥派生
+- 数据加密、解密与本地持久化
+- 终端安全输入与敏感信息隔离
+- 面向 TUI 的前端接入与状态组织
+
+## 项目目标
+
+ZKVault 的目标不是提供一组分散的命令行脚本，而是形成一套可演进的终端保险库基础设施。当前阶段优先完成以下目标：
+
+- 建立稳定的本地保险库核心
+- 明确终端前端的接入契约
+- 为 TUI 交互层提供清晰、可测试的调用边界
+- 在不引入网络暴露面的前提下提升可维护性与可扩展性
+
+## 目标架构
+
+项目当前与后续的建议分层如下：
+
+- `Vault Core`
+  负责密钥派生、数据加密解密、文件存储、条目校验与安全边界控制。
+- `Terminal Integration Layer`
+  负责命令封装、输入采集、错误映射与前端调用组织。
+- `TUI Application Layer`
+  负责界面布局、焦点管理、快捷键、状态切换、列表与编辑视图编排。
+
+该分层的核心原则是：界面能力可以演进，安全核心边界不得被界面实现反向侵入。
+
+## 前端集成接口
+
+现阶段，对前端开放的集成接口由 `zkvault` 二进制提供。该接口集合构成当前 TUI 接入的最小动作域。
+
+```text
+zkvault init
+zkvault change-master-password
+zkvault add <name>
+zkvault get <name>
+zkvault update <name>
+zkvault delete <name>
+zkvault list
+```
+
+接口说明：
+
+- `init`：初始化保险库并生成 `.zkv_master`
+- `change-master-password`：更新主密码并重新包裹 DEK
+- `add <name>`：创建条目
+- `get <name>`：读取条目
+- `update <name>`：更新条目
+- `delete <name>`：删除条目
+- `list`：列出条目标识
+
+接口约束：
+
+- 主密码通过终端交互输入，不经命令行参数传递
+- `add` 与 `update` 在执行过程中继续交互式采集条目内容
+- 条目名仅允许字母、数字、`.`、`-`、`_`
+- 不允许空串、`.`、`..`、路径分隔符、空格及其他特殊字符
+
+对 TUI 而言，后续工作的重点应当是围绕上述动作域构建统一交互模型，而不是引入新的远程调用接口。
+
+## 目标交互范围
+
+面向 TUI 的核心功能域规划如下：
+
+- 初始化视图：首次创建保险库与主密码确认
+- 条目列表视图：浏览、筛选与定位条目
+- 条目详情视图：读取密码与备注信息
+- 条目编辑视图：新增、修改与删除操作
+- 设置视图：主密码轮换与本地配置项管理
+
+建议遵循以下前端设计约束：
+
+- 敏感输入始终通过受控交互完成，不进入 shell 历史
+- 删除、覆盖、主密码变更等操作必须具备显式确认机制
+- 列表、详情、编辑三类主流程应共享统一状态模型
+- 前端实现不得绕过保险库核心的数据校验与安全边界
+
+## 技术基线
+
+- 语言标准：C++20
+- 构建系统：CMake
 - 密码学库：OpenSSL
-- KDF：`scrypt`
+- 密钥派生：`scrypt`
 - 对称加密：`AES-256-GCM`
-- 当前条目类型：`PasswordEntry`
+- 当前数据模型：`PasswordEntry`
+- 运行环境：Linux
 
-数据模型：
-- `PasswordEntry`：`name`、`password`、`note`
-- `MasterKeyFile`：`version`、`kdf`、`salt`、`wrap_iv`、`encrypted_dek`、`auth_tag`
-- `EncryptedEntryFile`：`version`、`data_iv`、`ciphertext`、`auth_tag`
-
-## 目录结构
+当前仓库结构如下：
 
 ```text
 src/
 ├── crypto/   # 随机数、KDF、AES-GCM、hex 编解码
 ├── model/    # PasswordEntry、MasterKeyFile、EncryptedEntryFile
 ├── storage/  # .zkv_master 和条目文件读写
-└── main.cpp  # CLI 入口
+└── main.cpp  # 终端接入层入口
 ```
 
-## 快速开始
+## 构建与运行
 
-构建项目：
+构建：
 
 ```bash
 cmake -S . -B build
@@ -48,29 +127,40 @@ cmake --build build
 ./build/zkvault init
 ```
 
-程序会交互式提示输入两次主密码；两次一致后才会生成 `.zkv_master`。
+列出条目：
+
+```bash
+./build/zkvault list
+```
+
+读取条目：
+
+```bash
+./build/zkvault get <name>
+```
 
 ## 测试
 
-列出当前已注册的测试：
+查看测试：
 
 ```bash
 ctest --test-dir build -N
 ```
 
-运行全部测试：
+运行测试：
 
 ```bash
 ctest --test-dir build
 ```
 
-如果测试失败并希望直接看到失败输出：
+输出失败详情：
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-当前仓库已包含一条 CLI 冒烟测试 `zkvault_cli_smoke`，会在临时目录中验证以下主流程：
+当前仓库包含一条 CLI 冒烟测试 `zkvault_cli_smoke`，用于验证终端接入层是否能够正确驱动保险库核心，覆盖以下流程：
+
 - `init`
 - `add`
 - `get`
@@ -80,104 +170,42 @@ ctest --test-dir build --output-on-failure
 - 非法条目名拒绝
 - `delete`
 
-也可以直接运行测试脚本：
+也可直接执行：
 
 ```bash
 bash tests/cli_smoke_test.sh ./build/zkvault
 ```
 
-测试脚本会在 `/tmp` 下创建临时目录并自动清理，不会污染当前仓库中的 `.zkv_master` 或 `data/`。
+## 存储边界
 
-## 命令说明
+- 主密钥文件：`.zkv_master`
+- 加密条目文件：`data/<name>.zkv`
+- 外层容器格式：JSON
+- 条目业务内容不会以明文形式写入加密条目文件
 
-初始化保险库：
+## 项目规划
 
-```bash
-./build/zkvault init
-```
+### 阶段一：核心稳定化
 
-更换主密码：
+- 固化现有命令语义，形成明确的终端集成契约
+- 完善错误分类与异常路径处理
+- 补充更多负面场景与回归测试
+- 评估敏感内存生命周期管理的进一步收敛方案
 
-```bash
-./build/zkvault change-master-password
-```
+### 阶段二：终端接入层标准化
 
-程序会交互式提示输入当前主密码，并要求输入两次新主密码，然后使用新密码重新包裹 DEK 并覆盖 `.zkv_master`。
+- 将当前命令驱动逻辑整理为更清晰的前端调用边界
+- 为 TUI 提供一致的输入、输出与状态映射规则
+- 降低界面层与存储、加密实现的直接耦合
 
-新增条目：
+### 阶段三：TUI 应用实现
 
-```bash
-./build/zkvault add <name>
-```
+- 建立列表、详情、编辑、设置四类核心视图
+- 补充快捷键系统、焦点切换与确认对话机制
+- 完成基于终端状态机的交互编排
 
-程序会交互式提示输入主密码、条目密码和备注。
+### 阶段四：可维护性与扩展性增强
 
-读取条目：
-
-```bash
-./build/zkvault get <name>
-```
-
-更新条目：
-
-```bash
-./build/zkvault update <name>
-```
-
-程序会交互式提示输入主密码、条目密码和备注。
-
-删除条目：
-
-```bash
-./build/zkvault delete <name>
-```
-
-列出条目：
-
-```bash
-./build/zkvault list
-```
-
-说明：
-- 除 `delete` 和 `list` 外，命令都会交互式提示输入主密码
-- `add` 和 `update` 还会继续交互式输入条目密码和备注，避免敏感内容出现在 shell 历史或进程参数里
-
-条目名限制：
-- 只允许字母、数字、`.`、`-`、`_`
-- 不允许空串、`.`、`..`
-- 不允许路径分隔符、空格和其他特殊字符
-
-## 存储格式
-
-主密钥文件：
-- `.zkv_master`
-
-加密条目文件：
-- `data/<name>.zkv`
-
-当前版本中，`.zkv_master` 和 `*.zkv` 的外层容器都使用 JSON；真正的业务内容不会以明文写入条目文件。
-
-## 当前边界
-
-已经完成：
-- CLI 原型
-- 主密码不落盘
-- `scrypt` 派生 KEK
-- DEK 包裹与解包
-- 条目加密存储
-- 基础 CLI 冒烟测试
-
-尚未完成：
-- 日记条目
-- HTTP API / 守护进程形态
-- 更完整的错误分类
-- 更严格的敏感内存生命周期管理
-- 更全面的自动化测试覆盖
-- 存储格式升级机制
-
-## 后续方向
-
-- 补全日记模型
-- 将 `kdf` 参数显式写入主密钥文件
-- 增加单元测试和更多负面场景测试
-- 从 CLI 原型演进到服务端架构
+- 引入更稳定的模块边界与内部接口文档
+- 预留面向多种终端前端实现的扩展能力
+- 在保持本地单机场景前提下持续优化测试覆盖与工程质量
