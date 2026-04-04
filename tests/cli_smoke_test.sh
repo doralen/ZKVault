@@ -66,10 +66,18 @@ run_fail() {
 INIT_OUTPUT="$(run_ok $'test-master-password\ntest-master-password\n' init)"
 assert_contains "$INIT_OUTPUT" "initialized .zkv_master"
 [[ -f "$TMPDIR/.zkv_master" ]]
+[[ "$(stat -c '%a' "$TMPDIR/.zkv_master")" == "600" ]]
 
 ADD_OUTPUT="$(run_ok $'test-master-password\nentry-password\ninitial note\n' add email)"
 assert_contains "$ADD_OUTPUT" "saved to data/email.zkv"
 [[ -f "$TMPDIR/data/email.zkv" ]]
+[[ "$(stat -c '%a' "$TMPDIR/data/email.zkv")" == "600" ]]
+
+DUPLICATE_ADD_OUTPUT="$(run_fail '' add email)"
+assert_contains "$DUPLICATE_ADD_OUTPUT" "entry already exists"
+
+MISSING_UPDATE_OUTPUT="$(run_fail '' update missing)"
+assert_contains "$MISSING_UPDATE_OUTPUT" "entry does not exist"
 
 LIST_OUTPUT="$(run_ok '' list)"
 assert_contains "$LIST_OUTPUT" "email"
@@ -88,8 +96,12 @@ INITIAL_UPDATED_AT="$(printf '%s\n' "$GET_OUTPUT" | sed -n 's/.*"updated_at": "\
 [[ "$INITIAL_CREATED_AT" == "$INITIAL_UPDATED_AT" ]]
 
 sleep 1
-UPDATE_OUTPUT="$(run_ok $'test-master-password\nnew-entry-password\nupdated note\n' update email)"
+UPDATE_CANCEL_OUTPUT="$(run_fail $'wrong-name\n' update email)"
+assert_contains "$UPDATE_CANCEL_OUTPUT" "entry overwrite cancelled"
+
+UPDATE_OUTPUT="$(run_ok $'email\ntest-master-password\nnew-entry-password\nupdated note\n' update email)"
 assert_contains "$UPDATE_OUTPUT" "updated data/email.zkv"
+[[ "$(stat -c '%a' "$TMPDIR/data/email.zkv")" == "600" ]]
 
 UPDATED_GET_OUTPUT="$(run_ok $'test-master-password\n' get email)"
 assert_contains "$UPDATED_GET_OUTPUT" '"password": "new-entry-password"'
@@ -100,8 +112,9 @@ UPDATED_UPDATED_AT="$(printf '%s\n' "$UPDATED_GET_OUTPUT" | sed -n 's/.*"updated
 [[ -n "$UPDATED_UPDATED_AT" ]]
 [[ "$UPDATED_UPDATED_AT" != "$INITIAL_UPDATED_AT" ]]
 
-CHANGE_MASTER_OUTPUT="$(run_ok $'test-master-password\nnew-master-password\nnew-master-password\n' change-master-password)"
+CHANGE_MASTER_OUTPUT="$(run_ok $'CHANGE\ntest-master-password\nnew-master-password\nnew-master-password\n' change-master-password)"
 assert_contains "$CHANGE_MASTER_OUTPUT" "updated .zkv_master"
+[[ "$(stat -c '%a' "$TMPDIR/.zkv_master")" == "600" ]]
 
 OLD_PASSWORD_GET_OUTPUT="$(run_fail $'test-master-password\n' get email)"
 assert_contains "$OLD_PASSWORD_GET_OUTPUT" "error: AES-256-GCM decryption failed"
@@ -113,7 +126,11 @@ INVALID_NAME_OUTPUT="$(run_fail $'new-master-password\nignored\nignored\n' add b
 assert_contains "$INVALID_NAME_OUTPUT" "entry name may only contain letters, digits, '.', '-' and '_'"
 [[ ! -e "$TMPDIR/data/bad/name.zkv" ]]
 
-DELETE_OUTPUT="$(run_ok '' delete email)"
+DELETE_CANCEL_OUTPUT="$(run_fail $'wrong-name\n' delete email)"
+assert_contains "$DELETE_CANCEL_OUTPUT" "entry deletion cancelled"
+[[ -f "$TMPDIR/data/email.zkv" ]]
+
+DELETE_OUTPUT="$(run_ok $'email\n' delete email)"
 assert_contains "$DELETE_OUTPUT" "deleted data/email.zkv"
 [[ ! -f "$TMPDIR/data/email.zkv" ]]
 

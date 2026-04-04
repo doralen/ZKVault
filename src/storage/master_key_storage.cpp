@@ -4,18 +4,15 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "storage/atomic_file.hpp"
+
 namespace {
 
 const std::filesystem::path kMasterKeyPath = ".zkv_master";
 
 void WriteMasterKeyFile(const MasterKeyFile& file) {
-    std::ofstream output(kMasterKeyPath);
-    if (!output) {
-        throw std::runtime_error("failed to open .zkv_master");
-    }
-
     json serialized = file;
-    output << serialized.dump(2);
+    WriteFileAtomically(kMasterKeyPath, serialized.dump(2));
 }
 
 }  // namespace

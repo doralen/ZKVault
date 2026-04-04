@@ -87,6 +87,16 @@ std::string ReadLine(const std::string& prompt) {
     return value;
 }
 
+void RequireExactConfirmation(
+    const std::string& prompt,
+    const std::string& expected,
+    const std::string& mismatch_error) {
+    const std::string value = ReadLine(prompt);
+    if (value != expected) {
+        throw std::runtime_error(mismatch_error);
+    }
+}
+
 std::string ReadConfirmedSecret(
     const std::string& prompt,
     const std::string& confirm_prompt,
@@ -235,6 +245,10 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
+            RequireExactConfirmation(
+                "Type CHANGE to confirm master password rotation: ",
+                "CHANGE",
+                "master password rotation cancelled");
             std::string current_master_password =
                 ReadSecret("Current master password: ");
             std::vector<unsigned char> dek = UnlockDataKey(current_master_password);
@@ -259,13 +273,29 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
+            const bool entry_exists = PasswordEntryExists(argv[2]);
+            if (command == "add" && entry_exists) {
+                throw std::runtime_error("entry already exists");
+            }
+
+            if (command == "update" && !entry_exists) {
+                throw std::runtime_error("entry does not exist");
+            }
+
+            if (command == "update") {
+                RequireExactConfirmation(
+                    "Type the entry name to confirm overwrite: ",
+                    argv[2],
+                    "entry overwrite cancelled");
+            }
+
             std::string master_password = ReadSecret("Master password: ");
             std::vector<unsigned char> dek = UnlockDataKey(master_password);
 
             std::string now = NowIso8601();
             std::string created_at = now;
 
-            if (command == "update" && PasswordEntryExists(argv[2])) {
+            if (command == "update") {
                 PasswordEntry old_entry =
                     DecryptPasswordEntry(LoadEncryptedEntryFile(argv[2]), dek);
                 if (!old_entry.created_at.empty()) {
@@ -321,6 +351,10 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
+            RequireExactConfirmation(
+                "Type the entry name to confirm deletion: ",
+                argv[2],
+                "entry deletion cancelled");
             DeletePasswordEntry(argv[2]);
             std::cout << "deleted data/" << argv[2] << ".zkv\n";
             return 0;

@@ -4,8 +4,10 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <string_view>
 #include <stdexcept>
+#include <string_view>
+
+#include "storage/atomic_file.hpp"
 
 namespace {
 
@@ -36,15 +38,8 @@ std::filesystem::path EntryPath(const std::string& name) {
 }  // namespace
 
 void SaveEncryptedEntryFile(const std::string& name, const EncryptedEntryFile& file) {
-    std::filesystem::create_directories("data");
-
-    std::ofstream output(EntryPath(name));
-    if (!output) {
-        throw std::runtime_error("failed to open output file");
-    }
-
     json serialized = file;
-    output << serialized.dump(2);
+    WriteFileAtomically(EntryPath(name), serialized.dump(2));
 }
 
 EncryptedEntryFile LoadEncryptedEntryFile(const std::string& name) {

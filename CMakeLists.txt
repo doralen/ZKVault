@@ -17,6 +17,7 @@ add_executable(zkvault
     src/crypto/random.cpp
     src/storage/master_key_storage.cpp
     src/storage/json_storage.cpp
+    src/storage/atomic_file.cpp
 )
 
 target_include_directories(zkvault PRIVATE
