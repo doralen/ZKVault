@@ -1,6 +1,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "app/frontend_contract.hpp"
 #include "app/vault_app.hpp"
@@ -11,10 +12,12 @@
 
 namespace {
 
-void PrintUsage() {
-    std::cout << "Usage:\n";
-    for (const std::string& command : CliUsageCommands()) {
-        std::cout << "  " << command << '\n';
+void PrintFrontendResult(FrontendActionResult result) {
+    auto result_guard = MakeScopedCleanse(result);
+    std::string output = RenderFrontendActionResult(result);
+    auto output_guard = MakeScopedCleanse(output);
+    if (!output.empty()) {
+        std::cout << output << '\n';
     }
 }
 
@@ -23,7 +26,7 @@ void PrintUsage() {
 int main(int argc, char* argv[]) {
     try {
         if (argc < 2) {
-            PrintUsage();
+            PrintFrontendResult(BuildCliUsageResult());
             return 1;
         }
 
@@ -31,7 +34,7 @@ int main(int argc, char* argv[]) {
 
         if (command == "shell") {
             if (argc != 2) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
@@ -40,7 +43,7 @@ int main(int argc, char* argv[]) {
 
         if (command == "init") {
             if (argc != 2) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
@@ -48,17 +51,17 @@ int main(int argc, char* argv[]) {
                 ReadConfirmedSecret(
                     "Master password: ",
                     "Confirm master password: ",
-                    "master passwords do not match")
+                "master passwords do not match")
             };
             auto request_guard = MakeScopedCleanse(request);
             const InitializeVaultResult result = InitializeVault(request);
-            std::cout << "initialized " << result.master_key_path << '\n';
+            PrintFrontendResult(BuildInitializedResult(result.master_key_path));
             return 0;
         }
 
         if (command == "change-master-password") {
             if (argc != 2) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
@@ -77,13 +80,13 @@ int main(int argc, char* argv[]) {
             };
             auto request_guard = MakeScopedCleanse(request);
             const RotateMasterPasswordResult result = RotateMasterPassword(request);
-            std::cout << FormatUpdatedPathMessage(result.master_key_path) << '\n';
+            PrintFrontendResult(BuildUpdatedResult(result.master_key_path));
             return 0;
         }
 
         if (command == "add" || command == "update") {
             if (argc != 3) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
@@ -116,16 +119,16 @@ int main(int argc, char* argv[]) {
             auto request_guard = MakeScopedCleanse(request);
             const StorePasswordEntryResult result = StorePasswordEntry(request);
             if (command == "add") {
-                std::cout << FormatStoredEntryMessage(result.entry_path) << '\n';
+                PrintFrontendResult(BuildStoredEntryResult(result.entry_path));
             } else {
-                std::cout << FormatUpdatedPathMessage(result.entry_path) << '\n';
+                PrintFrontendResult(BuildUpdatedResult(result.entry_path));
             }
             return 0;
         }
 
         if (command == "get") {
             if (argc != 3) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
@@ -140,15 +143,13 @@ int main(int argc, char* argv[]) {
             auto request_guard = MakeScopedCleanse(request);
             PasswordEntry entry = LoadPasswordEntry(request);
             auto entry_guard = MakeScopedCleanse(entry);
-            std::string output = json(entry).dump(2);
-            auto output_guard = MakeScopedCleanse(output);
-            std::cout << output << '\n';
+            PrintFrontendResult(BuildShowEntryResult(std::move(entry)));
             return 0;
         }
 
         if (command == "delete") {
             if (argc != 3) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
@@ -164,26 +165,28 @@ int main(int argc, char* argv[]) {
                 rule.mismatch_error);
             const RemovePasswordEntryResult result =
                 RemovePasswordEntry(RemovePasswordEntryRequest{argv[2]});
-            std::cout << FormatDeletedEntryMessage(result.entry_path) << '\n';
+            PrintFrontendResult(BuildDeletedEntryResult(result.entry_path));
             return 0;
         }
 
         if (command == "list") {
             if (argc != 2) {
-                PrintUsage();
+                PrintFrontendResult(BuildCliUsageResult());
                 return 1;
             }
 
-            for (const std::string& name : ListEntryNames()) {
-                std::cout << name << '\n';
-            }
+            PrintFrontendResult(BuildListResult(ListEntryNames(), ""));
             return 0;
         }
 
-        PrintUsage();
+        PrintFrontendResult(BuildCliUsageResult());
         return 1;
     } catch (const std::exception& ex) {
-        std::cerr << "error: " << ex.what() << '\n';
+        FrontendError error = ClassifyFrontendError(ex.what());
+        std::string output = RenderFrontendError(error);
+        auto error_guard = MakeScopedCleanse(error);
+        auto output_guard = MakeScopedCleanse(output);
+        std::cerr << output << '\n';
         return 1;
     }
 }

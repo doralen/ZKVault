@@ -4,7 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
+#include <utility>
 
 #include "app/frontend_contract.hpp"
 #include "app/vault_app.hpp"
@@ -15,21 +15,18 @@
 
 namespace {
 
-void PrintEntry(const PasswordEntry& entry) {
-    std::string output = json(entry).dump(2);
+void PrintFrontendResult(FrontendActionResult result) {
+    auto result_guard = MakeScopedCleanse(result);
+    std::string output = RenderFrontendActionResult(result);
     auto output_guard = MakeScopedCleanse(output);
-    std::cout << output << '\n';
-}
-
-void PrintShellHelp() {
-    std::cout << "Commands:\n";
-    for (const std::string& command : ShellHelpCommands()) {
-        std::cout << "  " << command << '\n';
+    if (!output.empty()) {
+        std::cout << output << '\n';
     }
 }
 
-VaultSession OpenOrInitializeSession() {
-    if (!std::filesystem::exists(".zkv_master")) {
+VaultSession OpenOrInitializeSession(FrontendSessionState& state) {
+    state = ResolveStartupState(std::filesystem::exists(".zkv_master"));
+    if (state == FrontendSessionState::kInitializingVault) {
         const std::string choice = ReadLine(
             "Vault not initialized. Create one now? [y/N]: ");
         if (choice != "y" && choice != "Y" && choice != "yes" && choice != "YES") {
@@ -44,46 +41,35 @@ VaultSession OpenOrInitializeSession() {
         };
         auto init_request_guard = MakeScopedCleanse(init_request);
         const InitializeVaultResult result = InitializeVault(init_request);
-        std::cout << "initialized " << result.master_key_path << '\n';
+        PrintFrontendResult(BuildInitializedResult(result.master_key_path));
+        state = FrontendSessionState::kReady;
         return VaultSession::Open(init_request.master_password);
     }
 
     std::string master_password = ReadSecret("Master password: ");
     auto master_password_guard = MakeScopedCleanse(master_password);
+    state = FrontendSessionState::kReady;
     return VaultSession::Open(master_password);
 }
 
-void PrintList(VaultSession& session) {
-    const std::vector<std::string> names = session.ListEntryNames();
-    if (names.empty()) {
-        std::cout << "(empty)\n";
-        return;
-    }
-
-    for (const std::string& name : names) {
-        std::cout << name << '\n';
-    }
-}
-
-void ExecuteShellCommand(
+FrontendActionResult ExecuteShellCommand(
     VaultSession& session,
     const FrontendCommand& command,
-    bool& should_quit) {
+    FrontendSessionState& state) {
+    state = ResolveCommandInputState(command.kind);
+
     if (command.kind == FrontendCommandKind::kHelp) {
-        PrintShellHelp();
-        return;
+        return BuildShellHelpResult();
     }
 
     if (command.kind == FrontendCommandKind::kList) {
-        PrintList(session);
-        return;
+        return BuildListResult(session.ListEntryNames(), "(empty)");
     }
 
     if (command.kind == FrontendCommandKind::kShow) {
         PasswordEntry entry = session.LoadEntry(command.name);
         auto entry_guard = MakeScopedCleanse(entry);
-        PrintEntry(entry);
-        return;
+        return BuildShowEntryResult(std::move(entry));
     }
 
     if (command.kind == FrontendCommandKind::kAdd) {
@@ -96,8 +82,7 @@ void ExecuteShellCommand(
         };
         auto request_guard = MakeScopedCleanse(request);
         const StorePasswordEntryResult result = session.StoreEntry(request);
-        std::cout << FormatStoredEntryMessage(result.entry_path) << '\n';
-        return;
+        return BuildStoredEntryResult(result.entry_path);
     }
 
     if (command.kind == FrontendCommandKind::kUpdate) {
@@ -107,6 +92,7 @@ void ExecuteShellCommand(
             rule.prompt,
             rule.expected_value,
             rule.mismatch_error);
+        state = FrontendSessionState::kEditingEntry;
         StorePasswordEntryRequest request{
             EntryMutationMode::kUpdate,
             command.name,
@@ -116,8 +102,7 @@ void ExecuteShellCommand(
         };
         auto request_guard = MakeScopedCleanse(request);
         const StorePasswordEntryResult result = session.StoreEntry(request);
-        std::cout << FormatUpdatedPathMessage(result.entry_path) << '\n';
-        return;
+        return BuildUpdatedResult(result.entry_path);
     }
 
     if (command.kind == FrontendCommandKind::kDelete) {
@@ -128,8 +113,7 @@ void ExecuteShellCommand(
             rule.expected_value,
             rule.mismatch_error);
         const RemovePasswordEntryResult result = session.RemoveEntry(command.name);
-        std::cout << FormatDeletedEntryMessage(result.entry_path) << '\n';
-        return;
+        return BuildDeletedEntryResult(result.entry_path);
     }
 
     if (command.kind == FrontendCommandKind::kChangeMasterPassword) {
@@ -139,6 +123,7 @@ void ExecuteShellCommand(
             rule.prompt,
             rule.expected_value,
             rule.mismatch_error);
+        state = FrontendSessionState::kEditingEntry;
         std::string new_master_password = ReadConfirmedSecret(
             "New master password: ",
             "Confirm new master password: ",
@@ -146,22 +131,22 @@ void ExecuteShellCommand(
         auto new_master_password_guard = MakeScopedCleanse(new_master_password);
         const RotateMasterPasswordResult result =
             session.RotateMasterPassword(new_master_password);
-        std::cout << FormatUpdatedPathMessage(result.master_key_path) << '\n';
-        return;
+        return BuildUpdatedResult(result.master_key_path);
     }
 
     if (command.kind == FrontendCommandKind::kQuit) {
-        should_quit = true;
-        return;
+        return BuildQuitResult();
     }
+
+    throw std::runtime_error("unknown shell command");
 }
 
 }  // namespace
 
 int RunInteractiveShell() {
-    VaultSession session = OpenOrInitializeSession();
-
-    std::cout << "shell ready; type help for commands\n";
+    FrontendSessionState state = FrontendSessionState::kInitializingVault;
+    VaultSession session = OpenOrInitializeSession(state);
+    PrintFrontendResult(BuildShellReadyResult());
 
     std::string line;
     while (true) {
@@ -175,14 +160,21 @@ int RunInteractiveShell() {
         }
 
         try {
-            bool should_quit = false;
             const FrontendCommand command = ParseShellCommand(line);
-            ExecuteShellCommand(session, command, should_quit);
-            if (should_quit) {
+            FrontendActionResult result = ExecuteShellCommand(session, command, state);
+            state = result.state;
+            PrintFrontendResult(std::move(result));
+            if (state == FrontendSessionState::kQuitRequested) {
                 return 0;
             }
         } catch (const std::exception& ex) {
-            std::cout << "error: " << ex.what() << '\n';
+            state = FrontendSessionState::kFailed;
+            FrontendError error = ClassifyFrontendError(ex.what());
+            std::string output = RenderFrontendError(error);
+            auto error_guard = MakeScopedCleanse(error);
+            auto output_guard = MakeScopedCleanse(output);
+            std::cout << output << '\n';
+            state = FrontendSessionState::kReady;
         }
     }
 }

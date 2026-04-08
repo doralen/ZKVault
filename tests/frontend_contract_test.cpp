@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "app/frontend_contract.hpp"
 
@@ -104,6 +105,40 @@ void TestConfirmationRules() {
             "rotation mismatch error should match");
 }
 
+void TestSessionStateMapping() {
+    Require(ResolveStartupState(false) ==
+                FrontendSessionState::kInitializingVault,
+            "missing vault should map to initializing state");
+    Require(ResolveStartupState(true) == FrontendSessionState::kReady,
+            "existing vault should map to ready state");
+
+    Require(ResolveCommandInputState(FrontendCommandKind::kAdd) ==
+                FrontendSessionState::kEditingEntry,
+            "add should enter editing state");
+    Require(ResolveCommandInputState(FrontendCommandKind::kUpdate) ==
+                FrontendSessionState::kAwaitingConfirmation,
+            "update should enter confirmation state first");
+    Require(ResolveCommandInputState(FrontendCommandKind::kDelete) ==
+                FrontendSessionState::kAwaitingConfirmation,
+            "delete should enter confirmation state");
+    Require(ResolveCommandInputState(
+                FrontendCommandKind::kChangeMasterPassword) ==
+                FrontendSessionState::kAwaitingConfirmation,
+            "rotation should enter confirmation state");
+    Require(ResolveCommandInputState(FrontendCommandKind::kList) ==
+                FrontendSessionState::kShowingList,
+            "list should map to list state");
+    Require(ResolveCommandInputState(FrontendCommandKind::kShow) ==
+                FrontendSessionState::kShowingEntry,
+            "show should map to entry state");
+    Require(ResolveCommandInputState(FrontendCommandKind::kHelp) ==
+                FrontendSessionState::kShowingHelp,
+            "help should map to help state");
+    Require(ResolveCommandInputState(FrontendCommandKind::kQuit) ==
+                FrontendSessionState::kQuitRequested,
+            "quit should map to quit state");
+}
+
 void TestOutputFormatting() {
     Require(FormatStoredEntryMessage("data/email.zkv") ==
                 "saved to data/email.zkv",
@@ -115,6 +150,127 @@ void TestOutputFormatting() {
             "delete output should match");
 }
 
+void TestActionResultsAndRendering() {
+    const FrontendActionResult cli_usage = BuildCliUsageResult();
+    Require(cli_usage.state == FrontendSessionState::kShowingHelp,
+            "cli usage should map to help state");
+    Require(cli_usage.payload_kind == FrontendPayloadKind::kText,
+            "cli usage should be rendered as text");
+    Require(RenderFrontendActionResult(cli_usage).find("Usage:") == 0,
+            "cli usage should render with Usage header");
+    Require(RenderFrontendActionResult(cli_usage).find("zkvault shell") !=
+                std::string::npos,
+            "cli usage should render shell command");
+
+    const FrontendActionResult shell_ready = BuildShellReadyResult();
+    Require(shell_ready.state == FrontendSessionState::kReady,
+            "shell ready should map to ready state");
+    Require(RenderFrontendActionResult(shell_ready) ==
+                "shell ready; type help for commands",
+            "shell ready message should match");
+
+    const FrontendActionResult shell_help = BuildShellHelpResult();
+    Require(shell_help.state == FrontendSessionState::kShowingHelp,
+            "shell help should map to help state");
+    Require(RenderFrontendActionResult(shell_help).find("Commands:") == 0,
+            "shell help should render commands header");
+    Require(RenderFrontendActionResult(shell_help).find("show <name>") !=
+                std::string::npos,
+            "shell help should render show command");
+
+    const FrontendActionResult listed_entries =
+        BuildListResult(std::vector<std::string>{"bank", "email"}, "(empty)");
+    Require(listed_entries.state == FrontendSessionState::kShowingList,
+            "list result should map to list state");
+    Require(listed_entries.payload_kind == FrontendPayloadKind::kEntryNames,
+            "list result should expose entry names");
+    Require(RenderFrontendActionResult(listed_entries) == "bank\nemail",
+            "list result should render newline-separated names");
+
+    const FrontendActionResult empty_list =
+        BuildListResult(std::vector<std::string>{}, "(empty)");
+    Require(RenderFrontendActionResult(empty_list) == "(empty)",
+            "empty list should render explicit placeholder");
+
+    const FrontendActionResult shown_entry = BuildShowEntryResult(PasswordEntry{
+        "email",
+        "entry-password",
+        "note",
+        "created-at",
+        "updated-at"
+    });
+    Require(shown_entry.state == FrontendSessionState::kShowingEntry,
+            "show result should map to entry state");
+    Require(shown_entry.payload_kind == FrontendPayloadKind::kEntry,
+            "show result should expose entry payload");
+    Require(RenderFrontendActionResult(shown_entry).find(
+                "\"password\": \"entry-password\"") != std::string::npos,
+            "show result should render entry JSON");
+
+    const FrontendActionResult initialized =
+        BuildInitializedResult(".zkv_master");
+    Require(RenderFrontendActionResult(initialized) ==
+                "initialized .zkv_master",
+            "initialized result should render shared message");
+
+    const FrontendActionResult stored =
+        BuildStoredEntryResult("data/email.zkv");
+    Require(RenderFrontendActionResult(stored) == "saved to data/email.zkv",
+            "stored result should render shared message");
+
+    const FrontendActionResult updated = BuildUpdatedResult(".zkv_master");
+    Require(RenderFrontendActionResult(updated) == "updated .zkv_master",
+            "updated result should render shared message");
+
+    const FrontendActionResult deleted =
+        BuildDeletedEntryResult("data/email.zkv");
+    Require(RenderFrontendActionResult(deleted) == "deleted data/email.zkv",
+            "deleted result should render shared message");
+
+    const FrontendActionResult quit = BuildQuitResult();
+    Require(quit.state == FrontendSessionState::kQuitRequested,
+            "quit result should map to quit state");
+    Require(quit.payload_kind == FrontendPayloadKind::kNone,
+            "quit result should not produce output");
+    Require(RenderFrontendActionResult(quit).empty(),
+            "quit result should render empty output");
+}
+
+void TestErrorClassification() {
+    Require(ClassifyFrontendError("usage: update <name>").kind ==
+                FrontendErrorKind::kUsage,
+            "usage errors should be classified");
+    Require(ClassifyFrontendError("unknown shell command").kind ==
+                FrontendErrorKind::kUnknownCommand,
+            "unknown command errors should be classified");
+    Require(ClassifyFrontendError("entry already exists").kind ==
+                FrontendErrorKind::kConflict,
+            "conflict errors should be classified");
+    Require(ClassifyFrontendError("entry does not exist").kind ==
+                FrontendErrorKind::kNotFound,
+            "not-found errors should be classified");
+    Require(ClassifyFrontendError("entry overwrite cancelled").kind ==
+                FrontendErrorKind::kConfirmationRejected,
+            "confirmation errors should be classified");
+    Require(ClassifyFrontendError(
+                "entry name may only contain letters, digits, '.', '-' and '_'")
+                .kind == FrontendErrorKind::kValidation,
+            "validation errors should be classified");
+    Require(ClassifyFrontendError("AES-256-GCM decryption failed").kind ==
+                FrontendErrorKind::kAuthentication,
+            "authentication errors should be classified");
+    const FrontendError storage_error =
+        ClassifyFrontendError("invalid .zkv_master JSON");
+    Require(storage_error.kind == FrontendErrorKind::kStorage,
+            "storage errors should be classified");
+    Require(RenderFrontendError(storage_error) ==
+                "error: invalid .zkv_master JSON",
+            "frontend errors should render consistently");
+    Require(ClassifyFrontendError("something unexpected").kind ==
+                FrontendErrorKind::kUnknown,
+            "unknown errors should stay unknown");
+}
+
 }  // namespace
 
 int main() {
@@ -123,7 +279,10 @@ int main() {
         TestShellHelpCommands();
         TestShellCommandParsing();
         TestConfirmationRules();
+        TestSessionStateMapping();
         TestOutputFormatting();
+        TestActionResultsAndRendering();
+        TestErrorClassification();
         return 0;
     } catch (const std::exception& ex) {
         return (std::fprintf(stderr, "frontend contract test failed: %s\n", ex.what()), 1);
