@@ -2,11 +2,11 @@
 
 #include <filesystem>
 #include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "app/frontend_contract.hpp"
 #include "app/vault_app.hpp"
 #include "app/vault_session.hpp"
 #include "crypto/secure_memory.hpp"
@@ -14,16 +14,6 @@
 #include "terminal/prompt.hpp"
 
 namespace {
-
-std::vector<std::string> SplitCommand(const std::string& line) {
-    std::istringstream input(line);
-    std::vector<std::string> parts;
-    std::string part;
-    while (input >> part) {
-        parts.push_back(part);
-    }
-    return parts;
-}
 
 void PrintEntry(const PasswordEntry& entry) {
     std::string output = json(entry).dump(2);
@@ -33,14 +23,9 @@ void PrintEntry(const PasswordEntry& entry) {
 
 void PrintShellHelp() {
     std::cout << "Commands:\n";
-    std::cout << "  help\n";
-    std::cout << "  list\n";
-    std::cout << "  show <name>\n";
-    std::cout << "  add <name>\n";
-    std::cout << "  update <name>\n";
-    std::cout << "  delete <name>\n";
-    std::cout << "  change-master-password\n";
-    std::cout << "  quit\n";
+    for (const std::string& command : ShellHelpCommands()) {
+        std::cout << "  " << command << '\n';
+    }
 }
 
 VaultSession OpenOrInitializeSession() {
@@ -80,91 +65,80 @@ void PrintList(VaultSession& session) {
     }
 }
 
-void RequireArgumentCount(
-    const std::vector<std::string>& parts,
-    std::size_t expected,
-    const std::string& usage) {
-    if (parts.size() != expected) {
-        throw std::runtime_error("usage: " + usage);
-    }
-}
-
 void ExecuteShellCommand(
     VaultSession& session,
-    const std::vector<std::string>& parts,
+    const FrontendCommand& command,
     bool& should_quit) {
-    const std::string& command = parts[0];
-
-    if (command == "help") {
+    if (command.kind == FrontendCommandKind::kHelp) {
         PrintShellHelp();
         return;
     }
 
-    if (command == "list") {
-        RequireArgumentCount(parts, 1, "list");
+    if (command.kind == FrontendCommandKind::kList) {
         PrintList(session);
         return;
     }
 
-    if (command == "show") {
-        RequireArgumentCount(parts, 2, "show <name>");
-        PasswordEntry entry = session.LoadEntry(parts[1]);
+    if (command.kind == FrontendCommandKind::kShow) {
+        PasswordEntry entry = session.LoadEntry(command.name);
         auto entry_guard = MakeScopedCleanse(entry);
         PrintEntry(entry);
         return;
     }
 
-    if (command == "add") {
-        RequireArgumentCount(parts, 2, "add <name>");
+    if (command.kind == FrontendCommandKind::kAdd) {
         StorePasswordEntryRequest request{
             EntryMutationMode::kCreate,
-            parts[1],
+            command.name,
             "",
             ReadSecret("Entry password: "),
             ReadLine("Note: ")
         };
         auto request_guard = MakeScopedCleanse(request);
         const StorePasswordEntryResult result = session.StoreEntry(request);
-        std::cout << "saved to " << result.entry_path << '\n';
+        std::cout << FormatStoredEntryMessage(result.entry_path) << '\n';
         return;
     }
 
-    if (command == "update") {
-        RequireArgumentCount(parts, 2, "update <name>");
+    if (command.kind == FrontendCommandKind::kUpdate) {
+        const ExactConfirmationRule rule =
+            BuildOverwriteConfirmationRule(command.name);
         RequireExactConfirmation(
-            "Type the entry name to confirm overwrite: ",
-            parts[1],
-            "entry overwrite cancelled");
+            rule.prompt,
+            rule.expected_value,
+            rule.mismatch_error);
         StorePasswordEntryRequest request{
             EntryMutationMode::kUpdate,
-            parts[1],
+            command.name,
             "",
             ReadSecret("Entry password: "),
             ReadLine("Note: ")
         };
         auto request_guard = MakeScopedCleanse(request);
         const StorePasswordEntryResult result = session.StoreEntry(request);
-        std::cout << "updated " << result.entry_path << '\n';
+        std::cout << FormatUpdatedPathMessage(result.entry_path) << '\n';
         return;
     }
 
-    if (command == "delete") {
-        RequireArgumentCount(parts, 2, "delete <name>");
+    if (command.kind == FrontendCommandKind::kDelete) {
+        const ExactConfirmationRule rule =
+            BuildDeletionConfirmationRule(command.name);
         RequireExactConfirmation(
-            "Type the entry name to confirm deletion: ",
-            parts[1],
-            "entry deletion cancelled");
-        const RemovePasswordEntryResult result = session.RemoveEntry(parts[1]);
-        std::cout << "deleted " << result.entry_path << '\n';
+            rule.prompt,
+            rule.expected_value,
+            rule.mismatch_error);
+        const RemovePasswordEntryResult result = session.RemoveEntry(command.name);
+        std::cout << FormatDeletedEntryMessage(result.entry_path) << '\n';
         return;
     }
 
-    if (command == "change-master-password") {
-        RequireArgumentCount(parts, 1, "change-master-password");
+    if (command.kind == FrontendCommandKind::kChangeMasterPassword) {
+        const ExactConfirmationRule rule =
+            BuildMasterPasswordRotationConfirmationRule();
         RequireExactConfirmation(
-            "Type CHANGE to confirm master password rotation: ",
-            "CHANGE",
-            "master password rotation cancelled");
+            rule.prompt,
+            rule.expected_value,
+            rule.mismatch_error);
         std::string new_master_password = ReadConfirmedSecret(
             "New master password: ",
             "Confirm new master password: ",
@@ -172,17 +146,14 @@ void ExecuteShellCommand(
         auto new_master_password_guard = MakeScopedCleanse(new_master_password);
         const RotateMasterPasswordResult result =
             session.RotateMasterPassword(new_master_password);
-        std::cout << "updated " << result.master_key_path << '\n';
+        std::cout << FormatUpdatedPathMessage(result.master_key_path) << '\n';
         return;
     }
 
-    if (command == "quit" || command == "exit") {
-        RequireArgumentCount(parts, 1, "quit");
+    if (command.kind == FrontendCommandKind::kQuit) {
         should_quit = true;
         return;
     }
-
-    throw std::runtime_error("unknown shell command");
 }
 
 }  // namespace
@@ -199,20 +170,19 @@ int RunInteractiveShell() {
             return 0;
         }
 
-        const std::vector<std::string> parts = SplitCommand(line);
-        if (parts.empty()) {
+        if (line.find_first_not_of(" \t\r\n") == std::string::npos) {
             continue;
         }
 
-        bool should_quit = false;
         try {
-            ExecuteShellCommand(session, parts, should_quit);
+            bool should_quit = false;
+            const FrontendCommand command = ParseShellCommand(line);
+            ExecuteShellCommand(session, command, should_quit);
+            if (should_quit) {
+                return 0;
+            }
         } catch (const std::exception& ex) {
             std::cout << "error: " << ex.what() << '\n';
-        }
-
-        if (should_quit) {
-            return 0;
         }
     }
 }

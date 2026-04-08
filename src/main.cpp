@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "app/frontend_contract.hpp"
 #include "app/vault_app.hpp"
 #include "crypto/secure_memory.hpp"
 #include "model/password_entry.hpp"
@@ -12,14 +13,9 @@ namespace {
 
 void PrintUsage() {
     std::cout << "Usage:\n";
-    std::cout << "  zkvault init\n";
-    std::cout << "  zkvault shell\n";
-    std::cout << "  zkvault change-master-password\n";
-    std::cout << "  zkvault add <name>\n";
-    std::cout << "  zkvault get <name>\n";
-    std::cout << "  zkvault update <name>\n";
-    std::cout << "  zkvault delete <name>\n";
-    std::cout << "  zkvault list\n";
+    for (const std::string& command : CliUsageCommands()) {
+        std::cout << "  " << command << '\n';
+    }
 }
 
 }  // namespace
@@ -66,10 +62,12 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
+            const ExactConfirmationRule rule =
+                BuildMasterPasswordRotationConfirmationRule();
             RequireExactConfirmation(
-                "Type CHANGE to confirm master password rotation: ",
-                "CHANGE",
-                "master password rotation cancelled");
+                rule.prompt,
+                rule.expected_value,
+                rule.mismatch_error);
             RotateMasterPasswordRequest request{
                 ReadSecret("Current master password: "),
                 ReadConfirmedSecret(
@@ -79,7 +77,7 @@ int main(int argc, char* argv[]) {
             };
             auto request_guard = MakeScopedCleanse(request);
             const RotateMasterPasswordResult result = RotateMasterPassword(request);
-            std::cout << "updated " << result.master_key_path << '\n';
+            std::cout << FormatUpdatedPathMessage(result.master_key_path) << '\n';
             return 0;
         }
 
@@ -99,10 +97,12 @@ int main(int argc, char* argv[]) {
             }
 
             if (command == "update") {
+                const ExactConfirmationRule rule =
+                    BuildOverwriteConfirmationRule(argv[2]);
                 RequireExactConfirmation(
-                    "Type the entry name to confirm overwrite: ",
-                    argv[2],
-                    "entry overwrite cancelled");
+                    rule.prompt,
+                    rule.expected_value,
+                    rule.mismatch_error);
             }
 
             StorePasswordEntryRequest request{
@@ -115,8 +115,11 @@ int main(int argc, char* argv[]) {
             };
             auto request_guard = MakeScopedCleanse(request);
             const StorePasswordEntryResult result = StorePasswordEntry(request);
-            std::cout << (command == "add" ? "saved to " : "updated ")
-                      << result.entry_path << '\n';
+            if (command == "add") {
+                std::cout << FormatStoredEntryMessage(result.entry_path) << '\n';
+            } else {
+                std::cout << FormatUpdatedPathMessage(result.entry_path) << '\n';
+            }
             return 0;
         }
 
@@ -153,13 +156,15 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("entry does not exist");
             }
 
+            const ExactConfirmationRule rule =
+                BuildDeletionConfirmationRule(argv[2]);
             RequireExactConfirmation(
-                "Type the entry name to confirm deletion: ",
-                argv[2],
-                "entry deletion cancelled");
+                rule.prompt,
+                rule.expected_value,
+                rule.mismatch_error);
             const RemovePasswordEntryResult result =
                 RemovePasswordEntry(RemovePasswordEntryRequest{argv[2]});
-            std::cout << "deleted " << result.entry_path << '\n';
+            std::cout << FormatDeletedEntryMessage(result.entry_path) << '\n';
             return 0;
         }
 

@@ -112,6 +112,14 @@ zkvault list
 - 只有显式执行 `./build/zkvault shell` 时，才会进入当前的会话式终端前端原型
 - `shell` 提示符、确认输入和备注输入已统一走终端输入层处理，退格时不会再在屏幕上回显 `^H`
 
+当前 CLI 与 `shell` 已进一步共享同一套前端契约定义，集中收敛以下内容：
+
+- 命令词与参数个数校验
+- 高风险操作确认提示与取消错误文案
+- 面向前端的成功输出文案格式
+
+这使后续 TUI 可以直接复用既有动作语义，而不必分别对齐 CLI 与会话式 shell 的实现细节。
+
 ## 目标交互范围
 
 面向 TUI 的核心功能域规划如下：
@@ -143,7 +151,7 @@ zkvault list
 
 ```text
 src/
-├── app/      # 保险库动作与前端接入边界
+├── app/      # 保险库动作、会话状态与前端契约边界
 ├── crypto/   # 随机数、KDF、AES-GCM、hex 编解码
 ├── model/    # PasswordEntry、MasterKeyFile、EncryptedEntryFile
 ├── shell/    # 会话式终端前端原型
@@ -219,6 +227,7 @@ ctest --test-dir build --output-on-failure
 - `zkvault_cli_error_paths`
 - `zkvault_shell_smoke`
 - `zkvault_app_contract`
+- `zkvault_frontend_contract`
 - `zkvault_prompt_backspace`
 
 其中 `zkvault_cli_smoke` 覆盖以下流程：
@@ -262,6 +271,13 @@ ctest --test-dir build --output-on-failure
 - 主密码轮换后旧密码失效、新密码可解锁
 - 重名创建、缺失条目更新、非法条目名等应用层错误
 
+`zkvault_frontend_contract` 固化终端接入层共享的前端契约，覆盖以下规则：
+
+- CLI 用法与 shell help 的命令集合
+- shell 命令解析与参数个数校验
+- 覆盖、删除、主密码轮换三类确认规则
+- 成功输出文案的统一格式
+
 `zkvault_prompt_backspace` 使用 pseudo-terminal 验证终端输入行为，覆盖以下场景：
 
 - 密码输入下 `Backspace` 不会回显为 `^H`
@@ -283,6 +299,30 @@ bash tests/cli_smoke_test.sh ./build/zkvault
 - 敏感文件权限：仅文件所有者可读写（`0600`）
 - 持久化策略：同目录临时文件落盘后原子替换目标文件
 - 条目业务内容不会以明文形式写入加密条目文件
+
+## 本次改动
+
+本轮提交重点推进了“阶段二：终端接入层标准化”，不是新增命令，而是把既有 CLI 与会话式 shell 的共享行为正式收敛为统一契约，减少后续 TUI 接入时的重复适配成本。
+
+- 在 `src/app/` 中新增前端契约模块，统一定义命令集合、shell 命令解析、高风险确认规则与成功输出文案
+- `main.cpp` 与 `src/shell/interactive_shell.cpp` 改为复用同一套前端契约，避免 CLI 与 shell 在提示词、usage、确认语义上发生漂移
+- 新增 `zkvault_frontend_contract` 测试，并接入 `ctest`，用于固化终端接入层共享规则
+- README 已同步更新当前结构与测试说明，明确 `app/` 目录除了应用动作外也承载前端契约边界
+
+这次改动的目标是先把“命令式 CLI”和“会话式 shell”对未来 TUI 暴露的动作语义收紧，再继续往更高层的终端状态模型演进。
+
+## 未来需要增加的内容
+
+当前项目已经具备稳定的保险库核心、CLI 接口和会话式 shell 原型，但距离完整 TUI 仍有明确增量需要补齐。后续建议按以下方向继续推进：
+
+- 为终端前端补充更明确的状态模型，统一表达初始化、已解锁、编辑中、确认中、失败等界面状态
+- 在前端契约层继续下沉可复用的动作结果与错误映射，减少未来 TUI 直接依赖字符串文案
+- 为 shell/未来 TUI 增加更完整的交互回归测试，例如 EOF、中断、空输入、重复确认失败后的状态恢复
+- 开始实现列表、详情、编辑、设置四类核心视图的 TUI 编排，而不是继续扩展命令式入口
+- 补充界面层需要的快捷键、焦点切换、确认对话框和局部刷新机制
+- 继续增加工程质量保障，包括更多负面测试、边界条件测试以及内部接口文档
+
+在优先级上，建议先完成统一状态模型与动作结果映射，再进入全屏 TUI 视图实现；否则界面层很容易重新把业务规则散落回各个交互分支里。
 
 ## 项目规划
 
