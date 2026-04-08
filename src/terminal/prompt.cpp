@@ -11,6 +11,8 @@
 
 namespace {
 
+constexpr const char* kInputCancelledMessage = "input cancelled";
+
 enum class InputEchoMode {
     kVisible,
     kMasked,
@@ -137,6 +139,11 @@ InteractiveInputResult ReadInteractiveInputFromTerminal(InputEchoMode echo_mode)
         }
 
         if (bytes_read == 0) {
+            if (!value.empty()) {
+                std::cout << '\n';
+                return {std::move(value), false};
+            }
+
             return {std::move(value), true};
         }
 
@@ -174,11 +181,21 @@ std::string ReadSecret(const std::string& prompt) {
 
     if (!isatty(STDIN_FILENO)) {
         std::string secret;
-        std::getline(std::cin, secret);
+        if (!std::getline(std::cin, secret)) {
+            throw std::runtime_error(kInputCancelledMessage);
+        }
+
         return secret;
     }
 
-    return ReadInteractiveInputFromTerminal(InputEchoMode::kMasked).value;
+    const InteractiveInputResult result =
+        ReadInteractiveInputFromTerminal(InputEchoMode::kMasked);
+    if (result.reached_eof) {
+        std::cout << '\n';
+        throw std::runtime_error(kInputCancelledMessage);
+    }
+
+    return result.value;
 }
 
 bool TryReadLine(const std::string& prompt, std::string& value) {
@@ -198,9 +215,14 @@ bool TryReadLine(const std::string& prompt, std::string& value) {
 std::string ReadLine(const std::string& prompt) {
     std::string value;
     const bool read_success = TryReadLine(prompt, value);
-    if (!read_success && isatty(STDIN_FILENO)) {
-        std::cout << '\n';
+    if (!read_success) {
+        if (isatty(STDIN_FILENO)) {
+            std::cout << '\n';
+        }
+
+        throw std::runtime_error(kInputCancelledMessage);
     }
+
     return value;
 }
 

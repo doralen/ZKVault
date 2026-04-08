@@ -71,3 +71,12 @@ assert_contains "$OLD_PASSWORD_OUTPUT" "error: AES-256-GCM decryption failed"
 NEW_PASSWORD_OUTPUT="$(run_ok $'new-master-password\nhelp\nquit\n' shell)"
 assert_contains "$NEW_PASSWORD_OUTPUT" "shell ready; type help for commands"
 assert_contains "$NEW_PASSWORD_OUTPUT" "Commands:"
+
+SHELL_CANCELLED_INPUT_OUTPUT="$(run_ok $'new-master-password\nadd email\n' shell)"
+assert_contains "$SHELL_CANCELLED_INPUT_OUTPUT" "error: input cancelled"
+[[ ! -f "$TMPDIR/data/email.zkv" ]]
+
+SHELL_RECOVERY_OUTPUT="$(run_ok $'new-master-password\nadd email\nrecovery-password\nrecovery note\nupdate email\nwrong-name\nshow email\nquit\n' shell)"
+assert_contains "$SHELL_RECOVERY_OUTPUT" "saved to data/email.zkv"
+assert_contains "$SHELL_RECOVERY_OUTPUT" "error: entry overwrite cancelled"
+assert_contains "$SHELL_RECOVERY_OUTPUT" '"password": "recovery-password"'

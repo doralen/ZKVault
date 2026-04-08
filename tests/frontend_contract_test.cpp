@@ -252,6 +252,9 @@ void TestErrorClassification() {
     Require(ClassifyFrontendError("entry overwrite cancelled").kind ==
                 FrontendErrorKind::kConfirmationRejected,
             "confirmation errors should be classified");
+    Require(ClassifyFrontendError("input cancelled").kind ==
+                FrontendErrorKind::kInputCancelled,
+            "input cancellation should be classified");
     Require(ClassifyFrontendError(
                 "entry name may only contain letters, digits, '.', '-' and '_'")
                 .kind == FrontendErrorKind::kValidation,

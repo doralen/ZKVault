@@ -49,6 +49,7 @@ enum class FrontendErrorKind {
     kNotFound,
     kValidation,
     kConfirmationRejected,
+    kInputCancelled,
     kAuthentication,
     kStorage,
     kUnknown

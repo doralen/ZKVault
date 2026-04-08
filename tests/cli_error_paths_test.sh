@@ -69,6 +69,9 @@ assert_contains "$GET_MISSING_OUTPUT" "entry does not exist"
 DELETE_MISSING_OUTPUT="$(run_fail '' delete missing)"
 assert_contains "$DELETE_MISSING_OUTPUT" "entry does not exist"
 
+GET_CANCELLED_OUTPUT="$(run_fail '' get email)"
+assert_contains "$GET_CANCELLED_OUTPUT" "input cancelled"
+
 printf '{\n' > "$TMPDIR/.zkv_master"
 INVALID_MASTER_JSON_OUTPUT="$(run_fail $'test-master-password\n' get email)"
 assert_contains "$INVALID_MASTER_JSON_OUTPUT" "invalid .zkv_master JSON"

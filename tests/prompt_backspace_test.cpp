@@ -178,6 +178,41 @@ std::pair<std::string, std::string> RunLineInput(std::string_view input) {
     });
 }
 
+std::pair<std::string, std::string> RunPromptFailure(
+    std::string_view input,
+    const std::function<void()>& reader) {
+    int master_fd = -1;
+    int slave_fd = -1;
+    if (::openpty(&master_fd, &slave_fd, nullptr, nullptr, nullptr) != 0) {
+        throw std::runtime_error("failed to open pseudo-terminal");
+    }
+
+    ScopedFd master(master_fd);
+    ScopedFd slave(slave_fd);
+    ScopedFdRedirect redirect_stdin(STDIN_FILENO, slave.Get());
+    ScopedFdRedirect redirect_stdout(STDOUT_FILENO, slave.Get());
+
+    std::thread writer([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        WriteAll(master.Get(), input);
+    });
+
+    std::string failure_message;
+    try {
+        reader();
+    } catch (const std::exception& ex) {
+        failure_message = ex.what();
+    }
+    writer.join();
+
+    if (failure_message.empty()) {
+        throw std::runtime_error("expected prompt reader to fail");
+    }
+
+    const std::string terminal_output = ReadAvailable(master.Get());
+    return {failure_message, terminal_output};
+}
+
 void TestBackspaceHandling() {
     const auto [secret, terminal_output] =
         RunSecretInput(std::string("ab\bcd\n", 6));
@@ -226,6 +261,28 @@ void TestLineDeleteHandling() {
             "line input delete should not echo ^?");
 }
 
+void TestSecretEofCancellation() {
+    const auto [error_message, terminal_output] =
+        RunPromptFailure(std::string(1, 4), [] {
+            static_cast<void>(ReadSecret("Password: "));
+        });
+    Require(error_message == "input cancelled",
+            "secret input should reject empty EOF");
+    Require(terminal_output.find("Password: ") != std::string::npos,
+            "secret EOF should still show the prompt");
+}
+
+void TestLineEofCancellation() {
+    const auto [error_message, terminal_output] =
+        RunPromptFailure(std::string(1, 4), [] {
+            static_cast<void>(ReadLine("Value: "));
+        });
+    Require(error_message == "input cancelled",
+            "line input should reject empty EOF");
+    Require(terminal_output.find("Value: ") != std::string::npos,
+            "line EOF should still show the prompt");
+}
+
 }  // namespace
 
 int main() {
@@ -234,6 +291,8 @@ int main() {
         TestDeleteHandling();
         TestLineBackspaceHandling();
         TestLineDeleteHandling();
+        TestSecretEofCancellation();
+        TestLineEofCancellation();
         return 0;
     } catch (const std::exception& ex) {
         return (std::fprintf(stderr, "prompt backspace test failed: %s\n", ex.what()), 1);

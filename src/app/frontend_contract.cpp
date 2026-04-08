@@ -342,6 +342,13 @@ FrontendError ClassifyFrontendError(std::string_view message) {
         };
     }
 
+    if (message == "input cancelled") {
+        return FrontendError{
+            FrontendErrorKind::kInputCancelled,
+            std::string(message)
+        };
+    }
+
     if (message == "master passwords do not match" ||
         message == "new master passwords do not match" ||
         message == "entry name may only contain letters, digits, '.', '-' and '_'") {
