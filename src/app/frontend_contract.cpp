@@ -65,6 +65,20 @@ std::string FormatCommandBlock(
     return output.str();
 }
 
+void AppendTransitions(
+    std::vector<FrontendStateTransition>& transitions,
+    const std::vector<FrontendSessionState>& from_states,
+    FrontendStateEvent event,
+    FrontendSessionState to_state) {
+    for (FrontendSessionState from_state : from_states) {
+        transitions.push_back(FrontendStateTransition{
+            from_state,
+            event,
+            to_state
+        });
+    }
+}
+
 std::string RenderFocusedList(
     const FrontendFocusedList& focused_list,
     std::string_view empty_message) {
@@ -204,81 +218,239 @@ bool IsBlankShellInput(std::string_view line) {
     return line.find_first_not_of(" \t\r\n") == std::string_view::npos;
 }
 
-FrontendSessionState ResolveStartupState(bool vault_exists) {
-    if (!vault_exists) {
-        return FrontendSessionState::kInitializingVault;
-    }
+const std::vector<FrontendStateTransition>& FrontendStateTransitions() {
+    static const std::vector<FrontendStateTransition> kTransitions = [] {
+        std::vector<FrontendStateTransition> transitions;
 
-    return FrontendSessionState::kReady;
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kInitializingVault,
+            FrontendStateEvent::kVaultMissingAtStartup,
+            FrontendSessionState::kInitializingVault
+        });
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kInitializingVault,
+            FrontendStateEvent::kVaultExistsAtStartup,
+            FrontendSessionState::kReady
+        });
+
+        const std::vector<FrontendSessionState> interactive_states = {
+            FrontendSessionState::kReady,
+            FrontendSessionState::kLocked,
+            FrontendSessionState::kShowingHelp,
+            FrontendSessionState::kShowingList,
+            FrontendSessionState::kShowingEntry
+        };
+
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kHelpRequested,
+            FrontendSessionState::kShowingHelp);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kListRequested,
+            FrontendSessionState::kShowingList);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kFindRequested,
+            FrontendSessionState::kShowingList);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kNextRequested,
+            FrontendSessionState::kShowingList);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kPrevRequested,
+            FrontendSessionState::kShowingList);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kShowRequested,
+            FrontendSessionState::kShowingEntry);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kAddRequested,
+            FrontendSessionState::kEditingEntryForm);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kUpdateRequested,
+            FrontendSessionState::kConfirmingEntryOverwrite);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kDeleteRequested,
+            FrontendSessionState::kConfirmingEntryDeletion);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kMasterPasswordRotationRequested,
+            FrontendSessionState::kConfirmingMasterPasswordRotation);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kLockRequested,
+            FrontendSessionState::kLocked);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kUnlockRequested,
+            FrontendSessionState::kUnlockingSession);
+        AppendTransitions(
+            transitions,
+            interactive_states,
+            FrontendStateEvent::kQuitRequested,
+            FrontendSessionState::kQuitRequested);
+
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kConfirmingEntryOverwrite,
+            FrontendStateEvent::kConfirmationAccepted,
+            FrontendSessionState::kEditingEntryForm
+        });
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kConfirmingEntryDeletion,
+            FrontendStateEvent::kConfirmationAccepted,
+            FrontendSessionState::kReady
+        });
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kConfirmingMasterPasswordRotation,
+            FrontendStateEvent::kConfirmationAccepted,
+            FrontendSessionState::kEditingMasterPasswordForm
+        });
+
+        const std::vector<FrontendSessionState> failure_states = {
+            FrontendSessionState::kReady,
+            FrontendSessionState::kLocked,
+            FrontendSessionState::kUnlockingSession,
+            FrontendSessionState::kEditingEntryForm,
+            FrontendSessionState::kEditingMasterPasswordForm,
+            FrontendSessionState::kConfirmingEntryOverwrite,
+            FrontendSessionState::kConfirmingEntryDeletion,
+            FrontendSessionState::kConfirmingMasterPasswordRotation,
+            FrontendSessionState::kShowingHelp,
+            FrontendSessionState::kShowingList,
+            FrontendSessionState::kShowingEntry
+        };
+
+        AppendTransitions(
+            transitions,
+            failure_states,
+            FrontendStateEvent::kOperationFailed,
+            FrontendSessionState::kRecoveringFromFailure);
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kRecoveringFromFailure,
+            FrontendStateEvent::kRecoveryCompletedWhileUnlocked,
+            FrontendSessionState::kReady
+        });
+        transitions.push_back(FrontendStateTransition{
+            FrontendSessionState::kRecoveringFromFailure,
+            FrontendStateEvent::kRecoveryCompletedWhileLocked,
+            FrontendSessionState::kLocked
+        });
+
+        return transitions;
+    }();
+
+    return kTransitions;
 }
 
-FrontendSessionState ResolveCommandInputState(FrontendCommandKind kind) {
-    if (kind == FrontendCommandKind::kLock) {
-        return FrontendSessionState::kLocked;
-    }
+FrontendStateEvent ResolveStartupEvent(bool vault_exists) {
+    return vault_exists ? FrontendStateEvent::kVaultExistsAtStartup
+                        : FrontendStateEvent::kVaultMissingAtStartup;
+}
 
-    if (kind == FrontendCommandKind::kUnlock) {
-        return FrontendSessionState::kUnlockingSession;
-    }
-
-    if (kind == FrontendCommandKind::kAdd) {
-        return FrontendSessionState::kEditingEntryForm;
-    }
-
-    if (kind == FrontendCommandKind::kUpdate) {
-        return FrontendSessionState::kConfirmingEntryOverwrite;
-    }
-
-    if (kind == FrontendCommandKind::kDelete) {
-        return FrontendSessionState::kConfirmingEntryDeletion;
-    }
-
-    if (kind == FrontendCommandKind::kChangeMasterPassword) {
-        return FrontendSessionState::kConfirmingMasterPasswordRotation;
-    }
-
+FrontendStateEvent ResolveCommandEvent(FrontendCommandKind kind) {
     if (kind == FrontendCommandKind::kHelp) {
-        return FrontendSessionState::kShowingHelp;
+        return FrontendStateEvent::kHelpRequested;
     }
 
     if (kind == FrontendCommandKind::kList) {
-        return FrontendSessionState::kShowingList;
+        return FrontendStateEvent::kListRequested;
     }
 
     if (kind == FrontendCommandKind::kFind) {
-        return FrontendSessionState::kShowingList;
+        return FrontendStateEvent::kFindRequested;
     }
 
     if (kind == FrontendCommandKind::kNext) {
-        return FrontendSessionState::kShowingList;
+        return FrontendStateEvent::kNextRequested;
     }
 
     if (kind == FrontendCommandKind::kPrev) {
-        return FrontendSessionState::kShowingList;
+        return FrontendStateEvent::kPrevRequested;
     }
 
     if (kind == FrontendCommandKind::kShow) {
-        return FrontendSessionState::kShowingEntry;
+        return FrontendStateEvent::kShowRequested;
     }
 
-    if (kind == FrontendCommandKind::kQuit) {
-        return FrontendSessionState::kQuitRequested;
+    if (kind == FrontendCommandKind::kAdd) {
+        return FrontendStateEvent::kAddRequested;
     }
 
-    return FrontendSessionState::kReady;
-}
-
-FrontendSessionState ResolvePostConfirmationState(FrontendCommandKind kind) {
     if (kind == FrontendCommandKind::kUpdate) {
-        return FrontendSessionState::kEditingEntryForm;
-    }
-
-    if (kind == FrontendCommandKind::kChangeMasterPassword) {
-        return FrontendSessionState::kEditingMasterPasswordForm;
+        return FrontendStateEvent::kUpdateRequested;
     }
 
     if (kind == FrontendCommandKind::kDelete) {
-        return FrontendSessionState::kReady;
+        return FrontendStateEvent::kDeleteRequested;
+    }
+
+    if (kind == FrontendCommandKind::kChangeMasterPassword) {
+        return FrontendStateEvent::kMasterPasswordRotationRequested;
+    }
+
+    if (kind == FrontendCommandKind::kLock) {
+        return FrontendStateEvent::kLockRequested;
+    }
+
+    if (kind == FrontendCommandKind::kUnlock) {
+        return FrontendStateEvent::kUnlockRequested;
+    }
+
+    if (kind == FrontendCommandKind::kQuit) {
+        return FrontendStateEvent::kQuitRequested;
+    }
+
+    throw std::runtime_error("unsupported frontend command kind");
+}
+
+FrontendSessionState ResolveStateTransition(
+    FrontendSessionState from_state,
+    FrontendStateEvent event) {
+    for (const FrontendStateTransition& transition : FrontendStateTransitions()) {
+        if (transition.from_state == from_state && transition.event == event) {
+            return transition.to_state;
+        }
+    }
+
+    throw std::runtime_error("unsupported frontend state transition");
+}
+
+FrontendSessionState ResolveStartupState(bool vault_exists) {
+    return ResolveStateTransition(
+        FrontendSessionState::kInitializingVault,
+        ResolveStartupEvent(vault_exists));
+}
+
+FrontendSessionState ResolveCommandInputState(FrontendCommandKind kind) {
+    return ResolveStateTransition(
+        FrontendSessionState::kReady,
+        ResolveCommandEvent(kind));
+}
+
+FrontendSessionState ResolvePostConfirmationState(FrontendCommandKind kind) {
+    if (kind == FrontendCommandKind::kUpdate ||
+        kind == FrontendCommandKind::kDelete ||
+        kind == FrontendCommandKind::kChangeMasterPassword) {
+        return ResolveStateTransition(
+            ResolveCommandInputState(kind),
+            FrontendStateEvent::kConfirmationAccepted);
     }
 
     return ResolveCommandInputState(kind);

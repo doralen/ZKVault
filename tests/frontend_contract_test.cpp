@@ -208,6 +208,76 @@ void TestSessionStateMapping() {
             "confirmed delete should return to ready state");
 }
 
+void TestExplicitStateMachineTransitions() {
+    const auto& transitions = FrontendStateTransitions();
+    Require(!transitions.empty(),
+            "frontend state machine should expose explicit transitions");
+
+    Require(ResolveStartupEvent(false) ==
+                FrontendStateEvent::kVaultMissingAtStartup,
+            "missing vault should map to startup-missing event");
+    Require(ResolveStartupEvent(true) ==
+                FrontendStateEvent::kVaultExistsAtStartup,
+            "existing vault should map to startup-ready event");
+    Require(ResolveCommandEvent(FrontendCommandKind::kShow) ==
+                FrontendStateEvent::kShowRequested,
+            "show command should map to show-requested event");
+
+    Require(ResolveStateTransition(
+                FrontendSessionState::kInitializingVault,
+                FrontendStateEvent::kVaultExistsAtStartup) ==
+                FrontendSessionState::kReady,
+            "existing vault should transition startup state to ready");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kLocked,
+                FrontendStateEvent::kHelpRequested) ==
+                FrontendSessionState::kShowingHelp,
+            "locked state should still allow help view");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kShowingHelp,
+                FrontendStateEvent::kUnlockRequested) ==
+                FrontendSessionState::kUnlockingSession,
+            "display states should allow unlock transition");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kShowingList,
+                FrontendStateEvent::kShowRequested) ==
+                FrontendSessionState::kShowingEntry,
+            "list view should transition into entry view");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kConfirmingEntryOverwrite,
+                FrontendStateEvent::kConfirmationAccepted) ==
+                FrontendSessionState::kEditingEntryForm,
+            "overwrite confirmation should lead into entry form");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kConfirmingEntryDeletion,
+                FrontendStateEvent::kConfirmationAccepted) ==
+                FrontendSessionState::kReady,
+            "delete confirmation should resolve to ready");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kShowingEntry,
+                FrontendStateEvent::kOperationFailed) ==
+                FrontendSessionState::kRecoveringFromFailure,
+            "view states should recover through failure state");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kRecoveringFromFailure,
+                FrontendStateEvent::kRecoveryCompletedWhileUnlocked) ==
+                FrontendSessionState::kReady,
+            "recovery should return to ready when session remains unlocked");
+    Require(ResolveStateTransition(
+                FrontendSessionState::kRecoveringFromFailure,
+                FrontendStateEvent::kRecoveryCompletedWhileLocked) ==
+                FrontendSessionState::kLocked,
+            "recovery should return to locked when session is absent");
+
+    RequireThrows(
+        [] {
+            static_cast<void>(ResolveStateTransition(
+                FrontendSessionState::kReady,
+                FrontendStateEvent::kConfirmationAccepted));
+        },
+        "unsupported frontend state transition");
+}
+
 void TestOutputFormatting() {
     Require(FormatStoredEntryMessage("data/email.zkv") ==
                 "saved to data/email.zkv",
@@ -408,6 +478,7 @@ int main() {
         TestBlankShellInput();
         TestConfirmationRules();
         TestSessionStateMapping();
+        TestExplicitStateMachineTransitions();
         TestOutputFormatting();
         TestActionResultsAndRendering();
         TestErrorClassification();

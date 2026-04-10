@@ -232,7 +232,9 @@ FrontendActionResult BuildBrowseResult(const ShellBrowseState& state) {
 }
 
 VaultSession OpenOrInitializeSession(FrontendSessionState& state) {
-    state = ResolveStartupState(std::filesystem::exists(".zkv_master"));
+    state = ResolveStateTransition(
+        state,
+        ResolveStartupEvent(std::filesystem::exists(".zkv_master")));
     if (state == FrontendSessionState::kInitializingVault) {
         const std::string choice = ReadLine(
             "Vault not initialized. Create one now? [y/N]: ");
@@ -264,7 +266,7 @@ FrontendActionResult ExecuteShellCommand(
     const FrontendCommand& command,
     FrontendSessionState& state,
     ShellBrowseState& browse_state) {
-    state = ResolveCommandInputState(command.kind);
+    state = ResolveStateTransition(state, ResolveCommandEvent(command.kind));
 
     if (command.kind == FrontendCommandKind::kHelp) {
         return BuildShellHelpResult();
@@ -362,7 +364,9 @@ FrontendActionResult ExecuteShellCommand(
             rule.prompt,
             rule.expected_value,
             rule.mismatch_error);
-        state = ResolvePostConfirmationState(command.kind);
+        state = ResolveStateTransition(
+            state,
+            FrontendStateEvent::kConfirmationAccepted);
         StorePasswordEntryRequest request{
             EntryMutationMode::kUpdate,
             command.name,
@@ -384,6 +388,9 @@ FrontendActionResult ExecuteShellCommand(
             rule.prompt,
             rule.expected_value,
             rule.mismatch_error);
+        state = ResolveStateTransition(
+            state,
+            FrontendStateEvent::kConfirmationAccepted);
         const RemovePasswordEntryResult result =
             active_session.RemoveEntry(command.name);
         RefreshBrowseState(active_session, browse_state);
@@ -397,7 +404,9 @@ FrontendActionResult ExecuteShellCommand(
             rule.prompt,
             rule.expected_value,
             rule.mismatch_error);
-        state = ResolvePostConfirmationState(command.kind);
+        state = ResolveStateTransition(
+            state,
+            FrontendStateEvent::kConfirmationAccepted);
         std::string new_master_password = ReadConfirmedSecret(
             "New master password: ",
             "Confirm new master password: ",
@@ -441,15 +450,19 @@ int RunInteractiveShell() {
                 return 0;
             }
         } catch (const std::exception& ex) {
-            state = FrontendSessionState::kRecoveringFromFailure;
+            state = ResolveStateTransition(
+                state,
+                FrontendStateEvent::kOperationFailed);
             FrontendError error = ClassifyFrontendError(ex.what());
             std::string output = RenderFrontendError(error);
             auto error_guard = MakeScopedCleanse(error);
             auto output_guard = MakeScopedCleanse(output);
             std::cout << output << '\n';
-            state = session.has_value()
-                        ? FrontendSessionState::kReady
-                        : FrontendSessionState::kLocked;
+            state = ResolveStateTransition(
+                state,
+                session.has_value()
+                    ? FrontendStateEvent::kRecoveryCompletedWhileUnlocked
+                    : FrontendStateEvent::kRecoveryCompletedWhileLocked);
         }
     }
 }

@@ -45,6 +45,34 @@ enum class FrontendSessionState {
     kQuitRequested
 };
 
+enum class FrontendStateEvent {
+    kVaultMissingAtStartup,
+    kVaultExistsAtStartup,
+    kHelpRequested,
+    kListRequested,
+    kFindRequested,
+    kNextRequested,
+    kPrevRequested,
+    kShowRequested,
+    kAddRequested,
+    kUpdateRequested,
+    kDeleteRequested,
+    kMasterPasswordRotationRequested,
+    kLockRequested,
+    kUnlockRequested,
+    kQuitRequested,
+    kConfirmationAccepted,
+    kOperationFailed,
+    kRecoveryCompletedWhileUnlocked,
+    kRecoveryCompletedWhileLocked
+};
+
+struct FrontendStateTransition {
+    FrontendSessionState from_state;
+    FrontendStateEvent event;
+    FrontendSessionState to_state;
+};
+
 enum class FrontendPayloadKind {
     kNone,
     kText,
@@ -126,6 +154,16 @@ const std::vector<std::string>& ShellHelpCommands();
 FrontendCommand ParseShellCommand(const std::string& line);
 
 bool IsBlankShellInput(std::string_view line);
+
+const std::vector<FrontendStateTransition>& FrontendStateTransitions();
+
+FrontendStateEvent ResolveStartupEvent(bool vault_exists);
+
+FrontendStateEvent ResolveCommandEvent(FrontendCommandKind kind);
+
+FrontendSessionState ResolveStateTransition(
+    FrontendSessionState from_state,
+    FrontendStateEvent event);
 
 FrontendSessionState ResolveStartupState(bool vault_exists);
 
