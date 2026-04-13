@@ -217,6 +217,8 @@ FrontendActionResult BuildCliUsageResult();
 
 FrontendActionResult BuildShellReadyResult();
 
+FrontendActionResult BuildTuiReadyResult();
+
 FrontendActionResult BuildShellHelpResult();
 
 FrontendActionResult BuildLockedResult();

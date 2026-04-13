@@ -49,6 +49,7 @@ ZKVault 的目标不是提供一组分散的命令行脚本，而是形成一套
 ```text
 zkvault init
 zkvault shell
+zkvault tui
 zkvault change-master-password
 zkvault add <name>
 zkvault get <name>
@@ -61,6 +62,7 @@ zkvault list
 
 - `init`：初始化保险库并生成 `.zkv_master`
 - `shell`：启动一次解锁、多步操作的会话式终端前端原型
+- `tui`：启动当前的全屏终端界面原型
 - `change-master-password`：更新主密码并重新包裹 DEK
 - `add <name>`：创建条目
 - `get <name>`：读取条目
@@ -110,10 +112,13 @@ zkvault list
 
 这不是最终的全屏 TUI，但已经把未来界面层最关键的会话边界和状态持有方式跑通了。
 
+当前仓库也提供了 `zkvault tui` 原型。它在复用同一套前端契约与 shell runtime 的前提下，先接入备用屏幕（alternate screen）与全屏重绘骨架，用于验证未来 TUI 的屏幕生命周期、输出区域和浏览区编排方式。
+
 需要特别说明：
 
 - 直接运行 `./build/zkvault` 时，默认仍然是命令式 CLI 入口，不会自动进入 `shell`
 - 只有显式执行 `./build/zkvault shell` 时，才会进入当前的会话式终端前端原型
+- 显式执行 `./build/zkvault tui` 时，会进入当前的全屏 TUI 原型
 - `shell` 提示符、确认输入和备注输入已统一走终端输入层处理，退格时不会再在屏幕上回显 `^H`
 - 若设置 `ZKVAULT_SHELL_IDLE_TIMEOUT_SECONDS=<正整数>`，会话会在主提示符空闲超时后自动锁定并清屏
 
@@ -203,6 +208,12 @@ cmake --build build
 
 ```bash
 ./build/zkvault shell
+```
+
+启动全屏终端界面原型：
+
+```bash
+./build/zkvault tui
 ```
 
 若直接执行：

@@ -23,6 +23,14 @@ std::string BuildClearScreenSequence() {
     return "\x1b[2J\x1b[H";
 }
 
+std::string BuildEnterAlternateScreenSequence() {
+    return "\x1b[?1049h\x1b[?25l";
+}
+
+std::string BuildExitAlternateScreenSequence() {
+    return "\x1b[?25h\x1b[?1049l";
+}
+
 void ClearTerminalScreenIfInteractive() {
     if (!ShouldEmitTerminalControlSequences(STDOUT_FILENO)) {
         return;

@@ -31,12 +31,13 @@ void RequireThrows(
 
 void TestCliUsageCommands() {
     const auto& commands = CliUsageCommands();
-    Require(commands.size() == 8, "cli usage should expose 8 commands");
+    Require(commands.size() == 9, "cli usage should expose 9 commands");
     Require(commands[0] == "zkvault init", "cli usage should include init");
     Require(commands[1] == "zkvault shell", "cli usage should include shell");
-    Require(commands[2] == "zkvault change-master-password",
+    Require(commands[2] == "zkvault tui", "cli usage should include tui");
+    Require(commands[3] == "zkvault change-master-password",
             "cli usage should include master password rotation");
-    Require(commands[7] == "zkvault list", "cli usage should include list");
+    Require(commands[8] == "zkvault list", "cli usage should include list");
 }
 
 void TestShellHelpCommands() {
@@ -377,6 +378,9 @@ void TestActionResultsAndRendering() {
     Require(RenderFrontendActionResult(cli_usage).find("zkvault shell") !=
                 std::string::npos,
             "cli usage should render shell command");
+    Require(RenderFrontendActionResult(cli_usage).find("zkvault tui") !=
+                std::string::npos,
+            "cli usage should render tui command");
 
     const FrontendActionResult shell_ready = BuildShellReadyResult();
     Require(shell_ready.state == FrontendSessionState::kReady,
@@ -384,6 +388,13 @@ void TestActionResultsAndRendering() {
     Require(RenderFrontendActionResult(shell_ready) ==
                 "shell ready; type help for commands",
             "shell ready message should match");
+
+    const FrontendActionResult tui_ready = BuildTuiReadyResult();
+    Require(tui_ready.state == FrontendSessionState::kReady,
+            "tui ready should map to ready state");
+    Require(RenderFrontendActionResult(tui_ready) ==
+                "tui ready; type help for commands",
+            "tui ready message should match");
 
     const FrontendActionResult shell_help = BuildShellHelpResult();
     Require(shell_help.state == FrontendSessionState::kShowingHelp,

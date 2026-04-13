@@ -159,6 +159,13 @@ void TestClearScreenSequence() {
             "clear-screen sequence should match ANSI erase+home");
 }
 
+void TestAlternateScreenSequences() {
+    Require(BuildEnterAlternateScreenSequence() == "\x1b[?1049h\x1b[?25l",
+            "enter-alternate-screen sequence should match");
+    Require(BuildExitAlternateScreenSequence() == "\x1b[?25h\x1b[?1049l",
+            "exit-alternate-screen sequence should match");
+}
+
 void TestInteractiveTerminalEmission() {
     int master_fd = -1;
     int slave_fd = -1;
@@ -219,6 +226,7 @@ void TestNonInteractiveSuppression() {
 int main() {
     try {
         TestClearScreenSequence();
+        TestAlternateScreenSequences();
         TestInteractiveTerminalEmission();
         TestDumbTerminalSuppression();
         TestNonInteractiveSuppression();

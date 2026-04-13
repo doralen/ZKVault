@@ -163,6 +163,7 @@ const std::vector<std::string>& CliUsageCommands() {
     static const std::vector<std::string> kCommands = {
         "zkvault init",
         "zkvault shell",
+        "zkvault tui",
         "zkvault change-master-password",
         "zkvault add <name>",
         "zkvault get <name>",
@@ -632,6 +633,18 @@ FrontendActionResult BuildShellReadyResult() {
         FrontendSessionState::kReady,
         FrontendPayloadKind::kText,
         "shell ready; type help for commands",
+        "",
+        {},
+        {},
+        {}
+    };
+}
+
+FrontendActionResult BuildTuiReadyResult() {
+    return FrontendActionResult{
+        FrontendSessionState::kReady,
+        FrontendPayloadKind::kText,
+        "tui ready; type help for commands",
         "",
         {},
         {},

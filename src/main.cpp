@@ -8,6 +8,7 @@
 #include "crypto/secure_memory.hpp"
 #include "model/password_entry.hpp"
 #include "shell/interactive_shell.hpp"
+#include "tui/terminal_ui.hpp"
 #include "terminal/prompt.hpp"
 
 namespace {
@@ -39,6 +40,15 @@ int main(int argc, char* argv[]) {
             }
 
             return RunInteractiveShell();
+        }
+
+        if (command == "tui") {
+            if (argc != 2) {
+                PrintFrontendResult(BuildCliUsageResult());
+                return 1;
+            }
+
+            return RunTerminalUi();
         }
 
         if (command == "init") {
