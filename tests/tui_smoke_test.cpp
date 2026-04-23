@@ -453,6 +453,13 @@ void TestTuiSmoke(const char* binary_path) {
             "help shortcut description");
         ReadUntilContains(
             master.Get(),
+            "f or /    filter entries",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "help filter shortcut");
+        ReadUntilContains(
+            master.Get(),
             "a         create a new entry",
             std::chrono::seconds(2),
             output,
@@ -501,6 +508,85 @@ void TestTuiSmoke(const char* binary_path) {
                 "returning from help should preserve the current browse selection; "
                 "captured output: " + output);
         }
+
+        WriteAll(master.Get(), "f");
+        ReadUntilContains(
+            master.Get(),
+            "View: filter",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "browse filter view");
+        ReadUntilContains(
+            master.Get(),
+            "Filter entries.",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "browse filter heading");
+        ReadUntilContains(
+            master.Get(),
+            "> Filter: ",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "browse filter prompt");
+        WriteAll(master.Get(), "em\r");
+        ReadUntilContains(
+            master.Get(),
+            "View: list",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "filtered list view");
+        {
+            const std::size_t list_state = output.rfind("Session: unlocked | State: list");
+            Require(list_state != std::string::npos &&
+                        output.find("Entries [filter: em]:", list_state) !=
+                            std::string::npos,
+                    "applying a browse filter should render the active filter term");
+            Require(output.find("> email", list_state) != std::string::npos,
+                    "filtered browse view should keep the matching entry selected");
+            Require(output.find("  bank", list_state) == std::string::npos,
+                    "filtered browse view should hide non-matching entries");
+        }
+
+        WriteAll(master.Get(), "f");
+        ReadUntilContains(
+            master.Get(),
+            "View: filter",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "second browse filter view");
+        WriteAll(master.Get(), "\r");
+        ReadUntilContains(
+            master.Get(),
+            "View: list",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "list view after clearing browse filter");
+        {
+            const std::size_t list_state = output.rfind("Session: unlocked | State: list");
+            Require(list_state != std::string::npos,
+                    "clearing the browse filter should return to the list view");
+            Require(output.find("Entries [filter:", list_state) == std::string::npos,
+                    "clearing the browse filter should remove the filter banner");
+            Require(output.find("> bank", list_state) != std::string::npos,
+                    "clearing the browse filter should restore the unfiltered selection");
+            Require(output.find("  email", list_state) != std::string::npos,
+                    "clearing the browse filter should restore all entries");
+        }
+
+        WriteAll(master.Get(), "j");
+        ReadUntilContains(
+            master.Get(),
+            "> email",
+            std::chrono::seconds(2),
+            output,
+            cursor,
+            "selection after restoring email post-filter");
 
         WriteAll(master.Get(), "e");
         ReadUntilContains(

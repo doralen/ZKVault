@@ -68,6 +68,15 @@ inline void Cleanse(TuiMasterPasswordFormState& state) {
     ::Cleanse(state.confirm_master_password);
 }
 
+struct TuiBrowseFilterState {
+    bool active = false;
+    std::string term;
+};
+
+inline void Cleanse(TuiBrowseFilterState& state) {
+    ::Cleanse(state.term);
+}
+
 inline void Cleanse(ExactConfirmationRule& rule) {
     ::Cleanse(rule.prompt);
     ::Cleanse(rule.expected_value);
@@ -93,6 +102,7 @@ struct TuiRenderState {
     TuiPendingCommand pending_command;
     TuiEntryFormState entry_form;
     TuiMasterPasswordFormState master_password_form;
+    TuiBrowseFilterState browse_filter;
     TuiExactConfirmationState exact_confirmation;
 };
 
@@ -101,6 +111,7 @@ inline void Cleanse(TuiRenderState& state) {
     Cleanse(state.pending_command);
     Cleanse(state.entry_form);
     Cleanse(state.master_password_form);
+    Cleanse(state.browse_filter);
     Cleanse(state.exact_confirmation);
 }
 
@@ -220,6 +231,12 @@ void ClearMasterPasswordForm(TuiRenderState& state) {
     state.master_password_form.confirm_master_password.clear();
 }
 
+void ClearBrowseFilterForm(TuiRenderState& state) {
+    Cleanse(state.browse_filter);
+    state.browse_filter.active = false;
+    state.browse_filter.term.clear();
+}
+
 void ClearExactConfirmation(TuiRenderState& state) {
     Cleanse(state.exact_confirmation);
     state.exact_confirmation.active = false;
@@ -262,6 +279,11 @@ void PopulateEntryFormForUpdate(
 void BeginMasterPasswordForm(TuiRenderState& state) {
     ClearMasterPasswordForm(state);
     state.master_password_form.active = true;
+}
+
+void BeginBrowseFilterForm(TuiRenderState& state) {
+    ClearBrowseFilterForm(state);
+    state.browse_filter.active = true;
 }
 
 void BeginExactConfirmation(
@@ -343,6 +365,11 @@ std::string& ActiveMasterPasswordFormFieldValue(
     }
 
     throw std::runtime_error("unsupported tui master password form field");
+}
+
+std::string& ActiveBrowseFilterFieldValue(
+    TuiBrowseFilterState& state) {
+    return state.term;
 }
 
 void AdvanceEntryFormField(TuiEntryFormState& state) {
@@ -604,6 +631,16 @@ std::string_view DescribeCurrentView(const ShellRuntimeState& runtime) {
     }
 }
 
+std::string_view DescribeVisibleView(
+    const ShellRuntimeState& runtime,
+    const TuiRenderState& render_state) {
+    if (render_state.browse_filter.active) {
+        return "filter";
+    }
+
+    return DescribeCurrentView(runtime);
+}
+
 void RenderStatusSection(std::string_view status_message) {
     std::cout << "Status:\n";
     if (status_message.empty()) {
@@ -619,6 +656,7 @@ void RenderHelpView() {
     std::cout << "  Down / j  move selection forward\n";
     std::cout << "  Up / k    move selection backward\n";
     std::cout << "  Enter     view the selected entry\n";
+    std::cout << "  f or /    filter entries\n";
     std::cout << "  a         create a new entry\n";
     std::cout << "  e         update the selected entry\n";
     std::cout << "  d         delete the selected entry\n";
@@ -634,7 +672,11 @@ void RenderHelpView() {
 
 void RenderListView(const ShellBrowseSnapshot& snapshot) {
     if (snapshot.entry_names.empty()) {
-        std::cout << "No entries selected. Press `a` to add one.\n";
+        if (!snapshot.filter_term.empty()) {
+            std::cout << "No matches. Press `f` or `/` to change or clear the filter.\n";
+        } else {
+            std::cout << "No entries selected. Press `a` to add one.\n";
+        }
         return;
     }
 
@@ -644,7 +686,7 @@ void RenderListView(const ShellBrowseSnapshot& snapshot) {
     }
 
     std::cout << "Current selection: " << snapshot.selected_name << '\n';
-    std::cout << "Press Enter to open it, `a` to add, `e` to update, or `d` to delete.\n";
+    std::cout << "Press Enter to open it, `f` or `/` to filter, `a` to add, `e` to update, or `d` to delete.\n";
 }
 
 void RenderEntryView(const ShellRuntimeState& runtime) {
@@ -738,6 +780,14 @@ void RenderMasterPasswordFormView(
         true);
 }
 
+void RenderBrowseFilterView(const TuiBrowseFilterState& state) {
+    std::cout << "Filter entries.\n";
+    std::cout << "Type a term and press Enter to apply it.\n";
+    std::cout << "Submit an empty value to clear the current filter.\n";
+    std::cout << "Press Esc to cancel.\n\n";
+    RenderEntryFormField("Filter", state.term, true, false);
+}
+
 void RenderExactConfirmationView(
     const TuiExactConfirmationState& state) {
     if (state.kind == FrontendCommandKind::kUpdate) {
@@ -759,7 +809,12 @@ void RenderViewSection(
     const ShellRuntimeState& runtime,
     const ShellBrowseSnapshot& snapshot,
     const TuiRenderState& render_state) {
-    std::cout << "View: " << DescribeCurrentView(runtime) << '\n';
+    std::cout << "View: " << DescribeVisibleView(runtime, render_state) << '\n';
+
+    if (render_state.browse_filter.active) {
+        RenderBrowseFilterView(render_state.browse_filter);
+        return;
+    }
 
     switch (runtime.state_machine.state()) {
         case FrontendSessionState::kShowingHelp:
@@ -814,7 +869,7 @@ void RenderScreen(
     std::cout << "ZKVault TUI Prototype\n";
     std::cout << "Session: "
               << (ShellSessionUnlocked(runtime) ? "unlocked" : "locked")
-              << " | State: " << DescribeCurrentView(runtime)
+              << " | State: " << DescribeVisibleView(runtime, render_state)
               << "\n\n";
 
     RenderStatusSection(render_state.status_message);
@@ -828,7 +883,7 @@ void RenderScreen(
 
     RenderViewSection(runtime, snapshot, render_state);
 
-    std::cout << "\nKeys: Up/Down or j/k move, Enter shows, a adds, e updates, d deletes, m changes master password, Esc cancels/browses, ? help, l lock, u unlock, q quit.\n";
+    std::cout << "\nKeys: Up/Down or j/k move, Enter shows, f or / filters, a adds, e updates, d deletes, m changes master password, Esc cancels/browses, ? help, l lock, u unlock, q quit.\n";
     std::cout.flush();
 }
 
@@ -883,6 +938,12 @@ std::optional<FrontendCommand> ResolveTuiCommand(
                         return std::nullopt;
                     }
                     return FrontendCommand{FrontendCommandKind::kAdd, ""};
+                case 'f':
+                case '/':
+                    if (!runtime.session.has_value()) {
+                        return std::nullopt;
+                    }
+                    return FrontendCommand{FrontendCommandKind::kFind, ""};
                 case 'e':
                     if (!runtime.session.has_value()) {
                         return std::nullopt;
@@ -937,6 +998,7 @@ void BeginAddEntryFlow(
     TuiRenderState& render_state) {
     ClearPendingCommand(render_state);
     ClearMasterPasswordForm(render_state);
+    ClearBrowseFilterForm(render_state);
     ClearExactConfirmation(render_state);
     BeginEntryForm(render_state, EntryMutationMode::kCreate, "");
     ReplaceStatusMessage(render_state, "creating entry");
@@ -956,6 +1018,7 @@ void BeginUpdateEntryFlow(
     ClearPendingCommand(render_state);
     ClearEntryForm(render_state);
     ClearMasterPasswordForm(render_state);
+    ClearBrowseFilterForm(render_state);
     BeginExactConfirmation(
         render_state,
         FrontendCommandKind::kUpdate,
@@ -980,6 +1043,7 @@ void BeginDeleteEntryFlow(
     ClearPendingCommand(render_state);
     ClearEntryForm(render_state);
     ClearMasterPasswordForm(render_state);
+    ClearBrowseFilterForm(render_state);
     BeginExactConfirmation(
         render_state,
         FrontendCommandKind::kDelete,
@@ -997,6 +1061,7 @@ void BeginMasterPasswordRotationFlow(
     ClearPendingCommand(render_state);
     ClearEntryForm(render_state);
     ClearMasterPasswordForm(render_state);
+    ClearBrowseFilterForm(render_state);
     BeginExactConfirmation(
         render_state,
         FrontendCommandKind::kChangeMasterPassword,
@@ -1008,6 +1073,18 @@ void BeginMasterPasswordRotationFlow(
     static_cast<void>(
         runtime.state_machine.HandleCommand(
             FrontendCommandKind::kChangeMasterPassword));
+}
+
+void BeginBrowseFilterFlow(
+    TuiRenderState& render_state) {
+    ClearPendingCommand(render_state);
+    ClearEntryForm(render_state);
+    ClearMasterPasswordForm(render_state);
+    ClearExactConfirmation(render_state);
+    BeginBrowseFilterForm(render_state);
+    ReplaceStatusMessage(
+        render_state,
+        "type a filter term; submit an empty value to clear the current filter");
 }
 
 void CancelEntryForm(
@@ -1028,6 +1105,11 @@ void CancelMasterPasswordForm(
     ClearMasterPasswordForm(render_state);
     RestoreBrowseView(runtime);
     ReplaceStatusMessage(render_state, "master password rotation cancelled");
+}
+
+void CancelBrowseFilterForm(TuiRenderState& render_state) {
+    ClearBrowseFilterForm(render_state);
+    ReplaceStatusMessage(render_state, "browse filter cancelled");
 }
 
 void CancelExactConfirmation(
@@ -1096,6 +1178,29 @@ void SubmitMasterPasswordForm(
     }
 }
 
+void SubmitBrowseFilterForm(
+    ShellRuntimeState& runtime,
+    TuiRenderState& render_state) {
+    try {
+        FrontendActionResult result = ExecuteShellCommand(
+            runtime,
+            FrontendCommand{
+                FrontendCommandKind::kFind,
+                render_state.browse_filter.term
+            });
+        auto result_guard = MakeScopedCleanse(result);
+        const std::string status_message = RenderTuiStatusMessage(result);
+        ClearBrowseFilterForm(render_state);
+        if (status_message.empty()) {
+            ClearStatusMessage(render_state);
+        } else {
+            ReplaceStatusMessage(render_state, status_message);
+        }
+    } catch (const std::exception& ex) {
+        ReplaceStatusWithError(render_state, ex.what());
+    }
+}
+
 bool HandleEntryFormInput(
     ShellRuntimeState& runtime,
     TuiRenderState& render_state,
@@ -1134,6 +1239,39 @@ bool HandleEntryFormInput(
     }
 
     SubmitEntryForm(runtime, render_state);
+    return true;
+}
+
+bool HandleBrowseFilterInput(
+    ShellRuntimeState& runtime,
+    TuiRenderState& render_state,
+    const TuiInputEvent& input_event) {
+    if (!render_state.browse_filter.active) {
+        return false;
+    }
+
+    if (input_event.key == TuiKey::kBrowse) {
+        CancelBrowseFilterForm(render_state);
+        return true;
+    }
+
+    if (input_event.key == TuiKey::kBackspace) {
+        EraseLastCharacter(
+            ActiveBrowseFilterFieldValue(render_state.browse_filter));
+        return true;
+    }
+
+    if (input_event.text != '\0') {
+        ActiveBrowseFilterFieldValue(render_state.browse_filter).push_back(
+            input_event.text);
+        return true;
+    }
+
+    if (input_event.key == TuiKey::kShowSelection) {
+        SubmitBrowseFilterForm(runtime, render_state);
+        return true;
+    }
+
     return true;
 }
 
@@ -1326,6 +1464,7 @@ int RunTerminalUi() {
             ClearPendingCommand(render_state);
             ClearEntryForm(render_state);
             ClearMasterPasswordForm(render_state);
+            ClearBrowseFilterForm(render_state);
             ClearExactConfirmation(render_state);
             FrontendActionResult result = HandleShellIdleTimeout(runtime);
             auto result_guard = MakeScopedCleanse(result);
@@ -1341,6 +1480,10 @@ int RunTerminalUi() {
         }
 
         if (HandleEntryFormInput(runtime, render_state, input_event)) {
+            continue;
+        }
+
+        if (HandleBrowseFilterInput(runtime, render_state, input_event)) {
             continue;
         }
 
@@ -1371,6 +1514,11 @@ int RunTerminalUi() {
 
             if (command->kind == FrontendCommandKind::kDelete) {
                 BeginDeleteEntryFlow(runtime, render_state);
+                continue;
+            }
+
+            if (command->kind == FrontendCommandKind::kFind) {
+                BeginBrowseFilterFlow(render_state);
                 continue;
             }
 
@@ -1417,6 +1565,7 @@ int RunTerminalUi() {
             ClearPendingCommand(render_state);
             ClearEntryForm(render_state);
             ClearMasterPasswordForm(render_state);
+            ClearBrowseFilterForm(render_state);
             ClearExactConfirmation(render_state);
             static_cast<void>(RecoverShellViewAfterFailure(runtime));
             ReplaceStatusMessage(render_state, std::move(output));
